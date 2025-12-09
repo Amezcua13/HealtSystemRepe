@@ -1,42 +1,60 @@
-import { useEffect, useState } from "react";
-import { Alert } from "react-native";
+import { useState, useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { auth, db } from "../services/firebaseConfig";
-import { collection, query, where, getDocs, updateDoc, doc } from "firebase/firestore";
+import { collection, query, where, getDocs } from "firebase/firestore";
 
 export const useDoctorAppointmentsViewModel = () => {
   const [appointments, setAppointments] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    fetchAppointments();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchAppointments();
+    }, [])
+  );
 
   const fetchAppointments = async () => {
-    if (!auth.currentUser) return;
-    const q = query(collection(db, "appointments"), where("doctor", "==", auth.currentUser.displayName));
-    const snapshot = await getDocs(q);
-    const list = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-    setAppointments(list);
-  };
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+    
+    setLoading(true);
+    try {
+      // ESTRATEGIA HÍBRIDA (Compatibilidad):
+      // Intentamos buscar por 'doctorId' (lo nuevo) Y por 'doctor' (nombre, lo viejo)
+      // Nota: Firestore no permite "OR" lógicos sencillos en una sola query mixta.
+      // Haremos la búsqueda segura por ID, que es lo profesional.
+      
+      const q = query(
+        collection(db, "appointments"), 
+        where("doctorId", "==", currentUser.uid) // <--- Búsqueda por UID (Segura)
+      );
+      
+      const snapshot = await getDocs(q);
+      
+      // Si no encuentra nada, quizás son citas viejas guardadas solo con nombre
+      let list = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
-  const finalizarCita = async (appointmentId) => {
-    Alert.alert("Finalizar Cita", "¿Marcar esta cita como finalizada?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Finalizar",
-        onPress: async () => {
-          await updateDoc(doc(db, "appointments", appointmentId), { status: "Finalizada" });
-          fetchAppointments();
-        },
-      },
-    ]);
+      if (list.length === 0 && currentUser.displayName) {
+          console.log("Intentando buscar por nombre (compatibilidad)...");
+          const qName = query(
+            collection(db, "appointments"), 
+            where("doctor", "==", currentUser.displayName)
+          );
+          const snapName = await getDocs(qName);
+          list = snapName.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      }
+      
+      setAppointments(list);
+    } catch (error) {
+      console.error("Error cargando citas:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return {
     appointments,
-    finalizarCita,
+    loading,
     fetchAppointments,
   };
 };

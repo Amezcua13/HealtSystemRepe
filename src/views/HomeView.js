@@ -2,15 +2,19 @@ import React from "react";
 import { View, StyleSheet, Pressable } from "react-native";
 import { Text, Card, Avatar } from "react-native-paper";
 import { LinearGradient } from "expo-linear-gradient";
+import { useNavigation } from "@react-navigation/native"; // <--- 1. IMPORTANTE: Importar esto
 import { useHomeViewModel } from "../viewmodels/HomeViewModel";
 
 const HomeView = () => {
+  // 2. IMPORTANTE: Usamos el hook aquí directamente
+  const navigation = useNavigation();
+
+  // 3. Ya NO pedimos 'navigation' al ViewModel
   const {
     user,
     saludo,
     nextAppointment,
     handleLogout,
-    navigation,
   } = useHomeViewModel();
 
   return (
@@ -47,6 +51,7 @@ const HomeView = () => {
       )}
 
       <View style={styles.menu}>
+        {/* Ahora navigation.navigate funcionará correctamente */}
         <Pressable onPress={() => navigation.navigate("Appointments")} style={styles.menuButton}>
           <Text style={styles.menuButtonText}>📋 Citas Médicas</Text>
         </Pressable>

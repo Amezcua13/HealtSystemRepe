@@ -1,136 +1,116 @@
-import React, { useEffect, useState } from "react";
-import { View, StyleSheet, ScrollView, Alert } from "react-native";
-import { Text, Button, Avatar, Card } from "react-native-paper";
+import React from "react";
+import { View, StyleSheet, ScrollView } from "react-native";
+import { Text, Button, Avatar, Card, TextInput, ActivityIndicator, Divider } from "react-native-paper";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { doc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
-import { auth, db } from "../services/firebaseConfig";
+import { useAppointmentDetailsViewModel } from "../viewmodels/AppointmentDetailsViewModel";
 
 const AppointmentDetailsView = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { appointmentId } = route.params;
+  
+  // Usamos el ViewModel
+  const { 
+    appointment, 
+    loading, 
+    diagnosis, 
+    setDiagnosis, 
+    notes, 
+    setNotes, 
+    handleFinishConsultation, 
+    handleCancelAppointment,
+    isFinalized 
+  } = useAppointmentDetailsViewModel(route.params, navigation);
 
-  const [appointment, setAppointment] = useState(null);
-  const [isDoctor, setIsDoctor] = useState(false);
-  const [loading, setLoading] = useState(true);
+  if (loading) {
+    return <View style={styles.center}><ActivityIndicator size="large" /></View>;
+  }
 
-  useEffect(() => {
-    const fetchAppointment = async () => {
-      try {
-        const ref = doc(db, "appointments", appointmentId);
-        const snap = await getDoc(ref);
-        if (snap.exists()) {
-          setAppointment({ id: snap.id, ...snap.data() });
-          const currentUid = auth.currentUser?.uid;
-          const doctorOwner = snap.data().doctorId === currentUid;
-          setIsDoctor(doctorOwner);
-        } else {
-          Alert.alert("Error", "Cita no encontrada");
-          navigation.goBack();
-        }
-      } catch (error) {
-        console.error("Error al obtener cita:", error);
-        Alert.alert("Error", "No se pudo cargar la cita");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchAppointment();
-  }, []);
-
-  const finalizarCita = async () => {
-    try {
-      if (!isDoctor || appointment.status === "Finalizada") {
-        Alert.alert("Acceso denegado", "No puedes modificar esta cita.");
-        return;
-      }
-
-      const ref = doc(db, "appointments", appointment.id);
-      await updateDoc(ref, { status: "Finalizada" });
-
-      Alert.alert("✅ Cita finalizada", "La cita fue marcada como finalizada.");
-      navigation.goBack();
-    } catch (error) {
-      console.error("Error al finalizar cita:", error);
-      if (error.code === "permission-denied") {
-        Alert.alert("Acceso denegado", "No tienes permiso para finalizar esta cita.");
-      } else {
-        Alert.alert("Error", "No se pudo finalizar la cita.");
-      }
-    }
-  };
-
-  const cancelarCita = async () => {
-    Alert.alert(
-      "¿Cancelar cita?",
-      "Esta acción eliminará permanentemente la cita.",
-      [
-        { text: "No", style: "cancel" },
-        {
-          text: "Sí",
-          onPress: async () => {
-            try {
-              if (!isDoctor) {
-                Alert.alert("Acceso denegado", "Solo el doctor asignado puede cancelar.");
-                return;
-              }
-
-              const ref = doc(db, "appointments", appointment.id);
-              await deleteDoc(ref);
-              Alert.alert("✅ Cita cancelada", "La cita fue eliminada.");
-              navigation.goBack();
-            } catch (error) {
-              console.error("Error al cancelar cita:", error);
-              Alert.alert("Error", "No se pudo cancelar la cita.");
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  if (loading || !appointment) return null;
+  if (!appointment) {
+    return <View style={styles.center}><Text>No se encontró la cita.</Text></View>;
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Avatar.Icon icon="calendar" size={70} style={styles.icon} />
-      <Text style={styles.title}>Detalle de la cita</Text>
+      <View style={styles.header}>
+        <Avatar.Icon icon="clipboard-pulse" size={60} style={{ backgroundColor: "#1E88E5" }} />
+        <Text style={styles.title}>Consulta Médica</Text>
+      </View>
 
+      {/* Tarjeta de Información del Paciente */}
       <Card style={styles.card}>
+        <Card.Title title="Datos del Paciente" left={(props) => <Avatar.Icon {...props} icon="account" />} />
         <Card.Content>
-          <Text style={styles.label}>Paciente:</Text>
-          <Text>{appointment.patient}</Text>
-
-          <Text style={styles.label}>Doctor:</Text>
-          <Text>{appointment.doctor}</Text>
-
-          <Text style={styles.label}>Fecha:</Text>
-          <Text>{appointment.date}</Text>
-
-          <Text style={styles.label}>Hora:</Text>
-          <Text>{appointment.time}</Text>
-
-          <Text style={styles.label}>Estado:</Text>
-          <Text>{appointment.status}</Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Paciente:</Text>
+            <Text style={styles.value}>{appointment.patient}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Motivo:</Text>
+            <Text style={styles.value}>{appointment.reason || "Consulta general"}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Fecha/Hora:</Text>
+            <Text style={styles.value}>{appointment.date} - {appointment.time}</Text>
+          </View>
+          <Text style={[styles.status, { color: isFinalized ? "green" : "orange" }]}>
+             Estado: {appointment.status.toUpperCase()}
+          </Text>
         </Card.Content>
       </Card>
 
-      {isDoctor && appointment.status !== "Finalizada" && (
+      <Divider style={{ marginVertical: 20 }} />
+
+      {/* Área Clínica (Diagnóstico y Notas) */}
+      <Text style={styles.sectionTitle}>📝 Registro Clínico</Text>
+      
+      <TextInput
+        label="Diagnóstico Médico *"
+        mode="outlined"
+        value={diagnosis}
+        onChangeText={setDiagnosis}
+        multiline
+        disabled={isFinalized} // Si ya finalizó, solo lectura
+        style={styles.input}
+        placeholder="Escriba el diagnóstico aquí..."
+      />
+
+      <TextInput
+        label="Receta / Observaciones"
+        mode="outlined"
+        value={notes}
+        onChangeText={setNotes}
+        multiline
+        numberOfLines={4}
+        disabled={isFinalized}
+        style={styles.input}
+        placeholder="Medicamentos recetados o notas internas..."
+      />
+
+      {/* Botones de Acción */}
+      {!isFinalized ? (
         <View style={styles.actions}>
           <Button
             mode="contained"
+            icon="check-circle"
             style={styles.finishButton}
-            onPress={finalizarCita}
+            contentStyle={{ paddingVertical: 5 }}
+            onPress={handleFinishConsultation}
           >
-            Finalizar Cita
+            Finalizar Consulta & Guardar
           </Button>
+
           <Button
-            mode="outlined"
-            style={styles.cancelButton}
-            onPress={cancelarCita}
+            mode="text"
+            icon="cancel"
+            textColor="#D32F2F"
+            onPress={handleCancelAppointment}
           >
             Cancelar Cita
           </Button>
+        </View>
+      ) : (
+        <View style={styles.finalizedBanner}>
+          <Text style={{ color: "white", fontWeight: "bold" }}>✅ Esta consulta ha finalizado</Text>
         </View>
       )}
     </ScrollView>
@@ -138,40 +118,26 @@ const AppointmentDetailsView = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 20,
+  container: { padding: 20, backgroundColor: "#F5F5F5", flexGrow: 1 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  header: { alignItems: "center", marginBottom: 20, marginTop: 10 },
+  title: { fontSize: 22, fontWeight: "bold", marginTop: 10, color: "#333" },
+  card: { backgroundColor: "white", borderRadius: 10, elevation: 2 },
+  sectionTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10, color: "#1565C0" },
+  row: { flexDirection: "row", marginBottom: 8 },
+  label: { fontWeight: "bold", width: 90, color: "#555" },
+  value: { flex: 1, color: "#333" },
+  status: { marginTop: 10, fontWeight: "bold", textAlign: "right" },
+  input: { marginBottom: 15, backgroundColor: "white" },
+  actions: { marginTop: 10, gap: 15 },
+  finishButton: { backgroundColor: "#2E7D32", borderRadius: 8 },
+  finalizedBanner: {
+    backgroundColor: "#2E7D32",
+    padding: 15,
+    borderRadius: 8,
     alignItems: "center",
-  },
-  icon: {
-    backgroundColor: "#1976D2",
-    marginBottom: 10,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 20,
-  },
-  card: {
-    width: "100%",
-    marginBottom: 20,
-  },
-  label: {
-    fontWeight: "bold",
-    marginTop: 10,
-  },
-  actions: {
-    width: "100%",
-    gap: 10,
-  },
-  finishButton: {
-    backgroundColor: "#1976D2",
-    padding: 8,
-  },
-  cancelButton: {
-    borderColor: "#D32F2F",
-    borderWidth: 1,
-    padding: 8,
-  },
+    marginTop: 20
+  }
 });
 
 export default AppointmentDetailsView;

@@ -1,97 +1,106 @@
-import { useNavigation, useRoute } from "@react-navigation/native";
-import { useEffect, useState } from "react";
-import { Alert, Animated } from "react-native";
-import { auth, db } from "../services/firebaseConfig";
-import { doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { useState, useEffect } from "react";
+import { Alert } from "react-native";
+import { doc, updateDoc, getDoc } from "firebase/firestore"; // Usamos updateDoc
+import { db } from "../services/firebaseConfig";
 
-export const useAppointmentDetailsViewModel = () => {
-  const route = useRoute();
-  const navigation = useNavigation();
-  const { appointment } = route.params;
+export const useAppointmentDetailsViewModel = (routeParams, navigation) => {
+  // Corrección del bug de parámetros:
+  // A veces llega el objeto completo 'appointment', a veces solo el ID. Manejamos ambos.
+  const initialAppointment = routeParams.appointment || null;
+  const appointmentId = initialAppointment ? initialAppointment.id : routeParams.appointmentId;
 
-  const [status, setStatus] = useState(appointment.status);
-  const [menuVisible, setMenuVisible] = useState(false);
-  const scaleValue = new Animated.Value(1);
-  const userId = auth.currentUser?.uid;
+  const [appointment, setAppointment] = useState(initialAppointment);
+  const [loading, setLoading] = useState(!initialAppointment); // Si ya tenemos datos, no cargamos
+  
+  // Campos clínicos (Solo para el doctor)
+  const [diagnosis, setDiagnosis] = useState(initialAppointment?.diagnosis || "");
+  const [notes, setNotes] = useState(initialAppointment?.notes || "");
 
+  // Cargar datos frescos de Firebase (por si cambiaron recientemente)
   useEffect(() => {
-    setStatus(appointment.status);
-  }, [appointment]);
+    const fetchLatestData = async () => {
+      if (!appointmentId) return;
+      try {
+        const docRef = doc(db, "appointments", appointmentId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = { id: docSnap.id, ...docSnap.data() };
+          setAppointment(data);
+          // Cargar diagnóstico previo si existe
+          if (data.diagnosis) setDiagnosis(data.diagnosis);
+          if (data.notes) setNotes(data.notes);
+        }
+      } catch (error) {
+        console.error("Error cargando cita:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const handleUpdateStatus = async (newStatus) => {
-    setStatus(newStatus);
-    setMenuVisible(false);
+    fetchLatestData();
+  }, [appointmentId]);
 
-    if (appointment.status === "Finalizada") {
-      Alert.alert("Acción no permitida", "Esta cita ya ha sido finalizada.");
-      return;
-    }
-
-    if (appointment.doctorId !== userId) {
-      Alert.alert("Acceso denegado", "No tienes permiso para actualizar esta cita.");
+  // Acción: Finalizar Consulta (Guardar historial)
+  const handleFinishConsultation = async () => {
+    if (!diagnosis.trim()) {
+      Alert.alert("Falta información", "Debes ingresar un diagnóstico antes de finalizar la consulta.");
       return;
     }
 
     try {
-      await updateDoc(doc(db, "appointments", appointment.id), { status: newStatus });
-      Alert.alert("Cita Actualizada", `El estado ha cambiado a: ${newStatus}`);
+      const docRef = doc(db, "appointments", appointment.id);
+      await updateDoc(docRef, {
+        status: "finalizada",
+        diagnosis: diagnosis,
+        notes: notes,
+        finishedAt: new Date() // Guardamos cuándo ocurrió
+      });
+      
+      Alert.alert("Consulta Finalizada", "El historial clínico ha sido guardado correctamente.");
+      navigation.goBack();
     } catch (error) {
-      console.error("Error al actualizar cita:", error);
-      if (error.code === "permission-denied") {
-        Alert.alert("Acceso denegado", "No tienes permiso para editar esta cita.");
-      } else {
-        Alert.alert("Error", "No se pudo actualizar el estado de la cita.");
-      }
+      console.error("Error al finalizar:", error);
+      Alert.alert("Error", "No se pudo guardar la consulta.");
     }
   };
 
+  // Acción: Cancelar Cita (Solo administrativo)
   const handleCancelAppointment = async () => {
-    if (appointment.doctorId !== userId) {
-      Alert.alert("Acceso denegado", "No tienes permiso para cancelar esta cita.");
-      return;
-    }
-
-    Alert.alert("Cancelar Cita", "¿Seguro que deseas cancelar esta cita?", [
-      { text: "No", style: "cancel" },
-      {
-        text: "Sí, cancelar",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteDoc(doc(db, "appointments", appointment.id));
-            Alert.alert("Cita Cancelada", "La cita ha sido eliminada correctamente.");
-            navigation.goBack();
-          } catch (error) {
-            console.error("Error al cancelar cita:", error);
-            if (error.code === "permission-denied") {
-              Alert.alert("Acceso denegado", "No tienes permiso para cancelar esta cita.");
-            } else {
+    Alert.alert(
+      "Cancelar Cita",
+      "¿El paciente no asistió o hubo un error? La cita quedará registrada como cancelada.",
+      [
+        { text: "No", style: "cancel" },
+        {
+          text: "Sí, cancelar",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const docRef = doc(db, "appointments", appointment.id);
+              await updateDoc(docRef, { // NO usamos deleteDoc
+                status: "cancelada",
+                updatedAt: new Date()
+              });
+              Alert.alert("Cita Cancelada", "El estado se ha actualizado.");
+              navigation.goBack();
+            } catch (error) {
               Alert.alert("Error", "No se pudo cancelar la cita.");
             }
-          }
+          },
         },
-      },
-    ]);
-  };
-
-  const handlePressIn = () => {
-    Animated.spring(scaleValue, { toValue: 0.95, useNativeDriver: true }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true }).start();
+      ]
+    );
   };
 
   return {
     appointment,
-    status,
-    menuVisible,
-    setMenuVisible,
-    scaleValue,
-    handleUpdateStatus,
+    loading,
+    diagnosis,
+    setDiagnosis,
+    notes,
+    setNotes,
+    handleFinishConsultation,
     handleCancelAppointment,
-    handlePressIn,
-    handlePressOut,
-    navigation,
+    isFinalized: appointment?.status?.toLowerCase() === "finalizada"
   };
 };

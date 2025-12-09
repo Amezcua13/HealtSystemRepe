@@ -4,6 +4,7 @@ import { auth, db } from "../services/firebaseConfig";
 import { doc, updateDoc } from "firebase/firestore";
 
 export const useEditAppointmentViewModel = (appointment, navigation) => {
+  // Mantenemos los estados para mostrar la información visualmente
   const [date, setDate] = useState(appointment.date);
   const [time, setTime] = useState(appointment.time);
   const [doctor, setDoctor] = useState(appointment.doctor);
@@ -17,50 +18,71 @@ export const useEditAppointmentViewModel = (appointment, navigation) => {
     else setSaludo("🌙 Buenas noches,");
   }, []);
 
-  const handleSaveChanges = async () => {
-    if (!date || !time || !doctor || !status) {
-      Alert.alert("Error", "Todos los campos son obligatorios.");
-      return;
-    }
-
+  // Función para Cancelar la Cita (Cambio de estado)
+  const handleCancelAppointment = async () => {
     const uid = auth.currentUser?.uid;
+
+    // Validación 1: Pertenencia
     if (appointment.userId !== uid) {
-      Alert.alert("Acceso denegado", "No puedes editar una cita que no es tuya.");
+      Alert.alert("Acceso denegado", "No puedes cancelar una cita que no es tuya.");
       return;
     }
 
-    if (appointment.status === "Finalizada") {
-      Alert.alert("Cita finalizada", "No puedes editar una cita finalizada.");
+    // Validación 2: Estado actual
+    if (status?.toLowerCase() === "finalizada") {
+      Alert.alert("No permitido", "No puedes cancelar una cita que ya finalizó.");
+      return;
+    }
+    
+    if (status?.toLowerCase() === "cancelada") {
+      Alert.alert("Aviso", "Esta cita ya se encuentra cancelada.");
       return;
     }
 
-    try {
-      await updateDoc(doc(db, "appointments", appointment.id), {
-        date,
-        time,
-        doctor,
-        status,
-      });
-      Alert.alert("✅ Éxito", "La cita ha sido actualizada.");
-      navigation.navigate("Appointments");
-    } catch (error) {
-      console.error("Error al actualizar cita:", error);
-      if (error.code === "permission-denied") {
-        Alert.alert("Permiso denegado", "No tienes permiso para editar esta cita.");
-      } else {
-        Alert.alert("Error", "No se pudo actualizar la cita.");
-      }
-    }
+    // Confirmación y Ejecución
+    Alert.alert(
+      "Confirmar Cancelación",
+      "¿Estás seguro de que deseas cancelar esta cita? Esta acción no se puede deshacer.",
+      [
+        { text: "No", style: "cancel" },
+        {
+          text: "Sí, cancelar",
+          style: "destructive", // Estilo rojo en iOS
+          onPress: async () => {
+            try {
+              // Actualizamos el estado en Firebase a "cancelada"
+              const appointmentRef = doc(db, "appointments", appointment.id);
+              await updateDoc(appointmentRef, {
+                status: "cancelada",
+              });
+              
+              // Actualizamos el estado local para que se refleje inmediatamente
+              setStatus("cancelada");
+
+              Alert.alert("Cita Cancelada", "Tu cita ha sido cancelada exitosamente.", [
+                { text: "OK", onPress: () => navigation.goBack() }
+              ]);
+            } catch (error) {
+              console.error("Error al cancelar cita:", error);
+              Alert.alert("Error", "Ocurrió un problema al intentar cancelar la cita.");
+            }
+          },
+        },
+      ]
+    );
   };
 
   const getStatusColor = (value) => {
-    switch (value.toLowerCase()) {
+    const val = value ? value.toLowerCase() : "";
+    switch (val) {
       case "finalizada":
-        return "#2E7D32";
+        return "#2E7D32"; // Verde
       case "pendiente":
-        return "#FFA000";
+        return "#FFA000"; // Naranja
       case "confirmada":
-        return "#1976D2";
+        return "#1976D2"; // Azul
+      case "cancelada":
+        return "#D32F2F"; // Rojo
       default:
         return "#000";
     }
@@ -72,11 +94,7 @@ export const useEditAppointmentViewModel = (appointment, navigation) => {
     doctor,
     status,
     saludo,
-    setDate,
-    setTime,
-    setDoctor,
-    setStatus,
-    handleSaveChanges,
+    handleCancelAppointment, // Exportamos la nueva función
     getStatusColor,
   };
 };
